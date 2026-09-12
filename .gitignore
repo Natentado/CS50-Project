@@ -1,0 +1,10 @@
+node_modules
+dist
+.output
+.nitro
+.tanstack
+.vite
+*.local
+
+# SQLite vote store (WAL creates -wal and -shm alongside it)
+wyr.db*
