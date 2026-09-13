@@ -1,112 +1,56 @@
-# Would You Rather? CS50 — TanStack Start
+# WOULD YOU RATHER? CS50
 
-A mobile-app-style "Would You Rather? CS50" game built on TanStack Start:
-file-based routing, validated search params, route loaders, typed server
-functions, streaming, and runtime-agnostic deployment — presented as
-full-screen app screens (no site chrome), in three languages, with two blue
-themes.
+#### Video Demo: <URL HERE>
 
-## The app
+#### Description:
 
-- **Home** — speech-bubble logo on a doodled blue background with two stacked
-  pill actions: **Play** and **Settings**.
-- **Play** — pick a session length: **Quick (10)**, **Classic (25)** or
-  **Marathon (50)**. A server function creates the shuffled, no-repeats game
-  session.
-- **Game** (`/game/$gameId?q=N`) — the two options split the whole viewport,
-  side by side above 720px and stacked on phones, with an OR badge on the seam.
-  The home screen's doodles carry straight through: one white artwork, tiled
-  against the viewport so the pattern is continuous across the seam, with each
-  side applying its own filter — etched dark on the warm pane, left light on the
-  cool one. Results and settings stay plain.
-  Chrome is deliberately thin: a hairline of progress, a close button and a
-  counter. Answering reveals both percentages, dims the side you passed on, and
-  starts a five-second countdown that carries you to the next question — there
-  is no Next button. The countdown ring doubles as the control if you want to
-  move on sooner, and coming *back* to an answered question never re-arms it.
-- **Results** — streamed in ("crunching the numbers…"): your score vs. the
-  majority plus a per-question breakdown.
-- **Settings** — **Language** (English, Español, Português) and **Theme**
-  (light = vivid blue, dark = deep navy). Persisted in a cookie; the server
-  renders the next request already in your language and theme.
+**Would You Rather? CS50** is a full-stack web game of impossible choices, built around fifty dilemmas drawn from the CS50x syllabus. Each question puts two options side by side — _hunt a segfault with no error message_ or _hunt a memory leak that never crashes anything?_ — you pick one, and the screen immediately shows how everyone else who has ever played answered the same question. It runs in three languages (English, Spanish and Portuguese), in a light or dark theme, and is designed to feel like a mobile app rather than a website: full-bleed screens, no navigation bar, no scrolling chrome.
 
-## Run it
+The project is written in TypeScript on **TanStack Start** (a full-stack React framework), with **SQLite** for persistence through Node's built-in `node:sqlite` module. It has no runtime dependencies beyond React, the router, and Zod. Every visual, including the speech-bubble logo, the doodled background and the favicon, is hand-written CSS or an inline SVG data URI.
+
+## How it plays
+
+From the home screen you press **Play**, which calls a server function that shuffles all fifty questions and creates a game session. Each question then takes over the entire viewport: two coloured panes split the screen, left and right on a desktop and top and bottom on a phone, with an "OR" badge sitting on the seam. Tapping a side records your vote and reveals both percentages, which count up from zero rather than simply appearing. The side you passed on desaturates to grey so the result reads at a glance.
+
+Five seconds after you answer, the game moves on by itself, with a draining ring in the corner showing how long is left. That ring is also a button, so you can skip ahead immediately if you have already absorbed the result. After the last question, a results screen streams in with your score against the majority and a per-question breakdown.
+
+## What each file does
+
+**`src/server/db.ts`** heart of the project and the file I spent the most time on. It holds all fifty dilemmas as a literal array of tuples — a slug, a category, and the two options in each of the three languages — and it opens and owns the SQLite database.The store it returns exposes a read-only map of questions plus three vote operations: read one, read many in a single query, and add a vote.
+
+**`src/server/functions.ts`** defines the five server functions: `startGame`, `getGameState`, `answerGame`, `getGameResults` and `saveSettings`. Each validates its input with a Zod before the handler runs. `answerGame` is idempotent per question — answering twice returns your first choice and does not count a second vote.
+
+**`src/routes/game.$gameId.tsx`** is the largest component. It contains the route definition (with a Zod-validated `?q=` search parameter), the split-screen "duel", the percentage count-up hook, the auto-advance timer, and the results screen. **`src/routes/__root.tsx`** renders the actual `<html>`, `<head>` and `<body>` elements, reads the settings cookie before anything else so the very first byte of HTML already carries the right `lang` and theme, and stamps a `data-screen` attribute on the body that tells the CSS which screen is showing. **`src/routes/index.tsx`** is the home screen and **`src/routes/settings.tsx`** the language and theme picker.
+
+**`src/i18n.ts`** holds three typed dictionaries. The English one defines the `Messages` type, so the Spanish and Portuguese objects fail to compile if a key is missing — translations cannot silently drift. **`src/settings.ts`** reads the settings cookie through `createIsomorphicFn`, using request headers on the server and `document.cookie` in the browser from the same call site. **`src/PlayButton.tsx`** is a small shared button that starts a game, and **`src/router.tsx`** configures the router, including deciding whether a navigation animates forward or backward by comparing route depth and question number.
+
+**`src/styles.css`** is all of the styling: theme tokens, the duel layout, and the animations. **`scripts/db.mjs`** is a small SQLite shell I wrote so the vote database can be inspected on the server without installing anything (`npm run db -- "SELECT ..."`, or an interactive prompt). **`vite.config.ts`** selects the deployment runtime, and `src/routeTree.gen.ts` is generated automatically from the route files.
+
+## Design choices
+
+**Questions live in code; only votes live in the database.** This was the decision I went back and forth on most. Putting the fifty dilemmas in SQLite felt like the "proper" thing to do, but question text is _content_, not data: it changes only when I edit it, and keeping it in the source means translations are versioned, diffable and reviewable in a commit. Vote totals are the opposite — they accumulate, they are shared between every player, and losing them is the only thing I would actually regret. So the database stores four columns: a slug, a category, and two counters.
+
+**Each question's identity is a slug, not its position.** Originally IDs were simply the array index. That is harmless while votes live in memory, but the moment they become durable it turns into silent data corruption: inserting a question at the top of the list would shift every stored vote onto a different dilemma, with nothing erroring. I changed every row to a stable slug (`segfault-vs-leak`) before adding persistence, so questions can be added, edited or reordered freely.
+
+**`node:sqlite` rather than `better-sqlite3`.** I intended to use `better-sqlite3`, but its prebuilt Windows binary segfaulted the process on open. Node's built-in SQLite module offers the same synchronous API — which matters, because it let the whole store stay non-`async` and kept the change contained to one file — with nothing to compile.
+
+**Votes are incremented in SQL, never read-modify-write.** `UPDATE questions SET votes_a = votes_a + 1 ... RETURNING` makes counting a vote a single atomic statement, so two simultaneous players cannot lose one another's votes.
+
+**Accessibility.** The counting percentages are hidden from screen readers, which get the final figure instead of a stream of meaningless numbers; the visually removed "Would you rather…" prompt survives as a hidden heading; and `prefers-reduced-motion` turns off both the count-up and the countdown animation.
+
+## Running it
 
 ```sh
 npm install
-npm run dev        # dev server on http://localhost:3000
-npm run build      # production build -> .output/
-npm start          # node .output/server/index.mjs
-npm run typecheck  # tsc --noEmit
+npm run dev        # http://localhost:3000
+npm run build
+npm start
+npm run typecheck
+npm run db         # inspect the vote database
 ```
 
-## Where each capability lives
-
-| Capability | Where | How |
-| --- | --- | --- |
-| File-based routes | `src/routes/` | `__root.tsx`, `index.tsx`, `play.tsx`, `game.$gameId.tsx`, `settings.tsx`; tree generated into `src/routeTree.gen.ts` |
-| Document shell | `src/routes/__root.tsx` | Root renders `<html>/<head>/<body>`; `beforeLoad` reads the settings cookie so the first byte already has the right `<html lang>` and `data-theme` |
-| Validated search params | `src/routes/game.$gameId.tsx` | `?q=` (current question) validated by zod; `?q=abc` is 307-redirected to the canonical `?q=1` |
-| Route loaders | play/game | The game loader wires `params` + `loaderDeps` + router `context` (language) into `getGameState` |
-| Typed server functions | `src/server/functions.ts` | `createServerFn().validator(zodSchema).handler(...)`; GET for reads, POST for `startGame`/`answerGame`/`saveSettings`; `notFound()` propagates to the router; `answerGame` is idempotent per question |
-| Server-only boundary | `src/server/db.ts` | Store accessor wrapped in `createServerOnlyFn`; the 50 CS50 questions × 3 languages and the SQLite handle never appear in a client bundle — only the current question, in one language, crosses the wire |
-| Persistence | `src/server/db.ts` | Vote totals live in SQLite via Node's built-in `node:sqlite` — no driver to compile, no connection string. Question *text* stays in code; only counters are stored |
-| Isomorphic boundary | `src/settings.ts` | `createIsomorphicFn`: cookie read from request headers on the server, `document.cookie` in the browser — same call site, zero network hops |
-| Streaming | `src/routes/game.$gameId.tsx` | The finished-game loader returns the slow `getGameResults` promise **unawaited**; the screen shows instantly and the summary streams into `<Suspense>` + `<Await>` |
-| i18n | `src/i18n.ts` | Typed dictionaries for `en`/`es`/`pt` (UI *and* question content) |
-
-`/settings` opts out of server rendering entirely (`ssr: false`) — it's a
-personal, interactive screen. Everything else keeps the default; it costs
-nothing and makes first paint instant.
-
-## Deployment runtime
-
-The runtime target is selected in [vite.config.ts](vite.config.ts) via the
-Nitro Vite plugin and **never leaks into application code**. Nitro is applied
-only for `vite build` (TanStack Start serves dev itself):
-
-```ts
-command === 'build' ? nitro({ preset }) : []
+```sh
+DATABASE_PATH=/var/lib/wyr/wyr.db npm start
 ```
 
-- Default: `node-server` → `npm run build && npm start`.
-- Other runtimes: set `TARGET_PRESET` (e.g. `bun`, `vercel`, `netlify`,
-  `cloudflare_module`) at build time, or swap in a host-specific plugin.
-  Routes, loaders, and server functions are unchanged either way.
-
-Two constraints come from the store, not from Nitro:
-
-- **A writable local disk.** Vote totals are a SQLite file, so the serverless
-  presets do not work as-is; a VPS or any host with a volume does. Set
-  `DATABASE_PATH` to somewhere that survives a redeploy — `.output/` is
-  rebuilt every time, so the default `./wyr.db` is for development only:
-
-  ```sh
-  DATABASE_PATH=/var/lib/wyr/wyr.db npm start
-  ```
-
-  Back it up with `sqlite3 wyr.db ".backup /backups/wyr-$(date +%F).db"` rather
-  than `cp`, so a vote landing mid-copy cannot tear the file.
-
-- **A single process.** Game sessions are in memory, so a game started on one
-  worker is unknown to another — run one instance, not pm2 cluster mode. (The
-  SQLite file itself is fine with many processes; the sessions are not.)
-  Moving sessions into SQLite would lift this, at the cost of a cleanup job.
-
-## Notes
-
-- The store (`src/server/db.ts`) splits three kinds of state deliberately:
-  **question text** is content, so it stays in the `ROWS` literal — versioned,
-  diffable, translatable in a commit, and re-read on every boot; **vote totals**
-  are the only thing that must outlive the process, so they live in SQLite;
-  **game sessions** are single-user and disposable, so they stay on
-  `globalThis` (capped at 200, oldest evicted) where they also survive dev HMR.
-- Each question's identity is its **slug**, not its position in `ROWS`. Votes
-  are keyed on it, so rows can be added, edited or reordered freely — but
-  renaming or reusing a slug would silently reattach votes to another dilemma.
-  Boot re-seeds new slugs and never overwrites an existing row's counters.
-- Votes are incremented in SQL (`votes_a = votes_a + 1`), never read-modify-write,
-  and `answerGame` stays idempotent per question, so a double-tap counts once.
-- Server functions are protected by TanStack Start's built-in CSRF middleware.
-- All visuals (logo bubble, doodle background, favicon) are hand-drawn
-  CSS/SVG data URIs — no emoji, no external assets, fully self-contained.
+**DISCLAIMER:** Code algorithms, functions and the UI's were builded alongside CLAUDE CODE, with Human in the loop all the time supervising the work. DB definitions and System Design implemented by me, the author, Nathan Molina.
